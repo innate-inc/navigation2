@@ -14,6 +14,7 @@
 
 #include "nav2_mppi_controller/optimizer.hpp"
 
+#include <algorithm>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -76,6 +77,14 @@ void Optimizer::getParams()
   getParam(s.base_constraints.vx_min, "vx_min", -0.35);
   getParam(s.base_constraints.vy, "vy_max", 0.5);
   getParam(s.base_constraints.wz, "wz_max", 1.9);
+  // Acceleration limits (backported from nav2 main); defaults are permissive
+  // enough to be effectively unconstrained unless configured.
+  getParam(s.base_constraints.ax_max, "ax_max", 3.0);
+  getParam(s.base_constraints.ax_min, "ax_min", -3.0);
+  getParam(s.base_constraints.az_max, "az_max", 3.5);
+  s.base_constraints.ax_max = fabs(s.base_constraints.ax_max);
+  s.base_constraints.ax_min = -fabs(s.base_constraints.ax_min);
+  s.base_constraints.az_max = fabs(s.base_constraints.az_max);
   getParam(s.sampling_std.vx, "vx_std", 0.2);
   getParam(s.sampling_std.vy, "vy_std", 0.2);
   getParam(s.sampling_std.wz, "wz_std", 0.4);
@@ -238,6 +247,33 @@ void Optimizer::applyControlSequenceConstraints()
 
   control_sequence_.vx = xt::clip(control_sequence_.vx, s.constraints.vx_min, s.constraints.vx_max);
   control_sequence_.wz = xt::clip(control_sequence_.wz, -s.constraints.wz, s.constraints.wz);
+
+  // Acceleration limits: clamp per-step deltas so the planned control
+  // sequence is executable by the base (backported from nav2 main).
+  // Read base_constraints: accel is not speed-limit-scaled, and this keeps
+  // dynamic parameter updates effective.
+  //
+  // Element 0 is intentionally left unconstrained (upstream behavior): the
+  // limit shapes within-plan dynamics, not cycle-to-cycle slew — replanning
+  // may still change the published command freely each cycle. Consequence:
+  // very low az_max degrades MPPI into an adaptive constant-curvature
+  // follower rather than freezing steering. Anchoring element 0 to the
+  // previously applied command would forbid that regime (measured on R7-27
+  // as the best-tracking config on a high-latency base) and would duplicate
+  // the velocity smoother's slew limiting, which added lag for no benefit.
+  const float max_delta_vx = s.model_dt * s.base_constraints.ax_max;
+  const float min_delta_vx = s.model_dt * s.base_constraints.ax_min;
+  const float max_delta_wz = s.model_dt * s.base_constraints.az_max;
+  float vx_last = control_sequence_.vx(0);
+  float wz_last = control_sequence_.wz(0);
+  for (unsigned int i = 1; i != control_sequence_.vx.shape(0); i++) {
+    float & vx_curr = control_sequence_.vx(i);
+    vx_curr = std::clamp(vx_curr, vx_last + min_delta_vx, vx_last + max_delta_vx);
+    vx_last = vx_curr;
+    float & wz_curr = control_sequence_.wz(i);
+    wz_curr = std::clamp(wz_curr, wz_last - max_delta_wz, wz_last + max_delta_wz);
+    wz_last = wz_curr;
+  }
 
   motion_model_->applyConstraints(control_sequence_);
 }
