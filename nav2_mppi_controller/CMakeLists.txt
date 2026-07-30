@@ -72,6 +72,10 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "(aarch64|arm64)")
   # no SVE). Builders on newer ARM cores otherwise emit SVE instructions here
   # via -O3/-ffast-math autovectorization, which SIGILLs on the robots.
   add_compile_options(-march=armv8.2-a)
+  # Debian builds link with -flto: final code generation happens at link
+  # time using the LINK line's flags, which silently discards the pin above
+  # (verified: objects compiled with the pin, shipped .so still had SVE).
+  add_link_options(-march=armv8.2-a)
 endif()
 
 add_library(mppi_controller SHARED
