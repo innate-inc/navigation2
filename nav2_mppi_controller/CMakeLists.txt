@@ -67,6 +67,13 @@ endif()
 # If building one the same hardware to be deployed on, try `-march=native`!
 add_compile_options(-O3 -finline-limit=10000000 -ffp-contract=fast -ffast-math -mtune=generic)
 
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "(aarch64|arm64)")
+  # Pin the ISA to the fleet baseline (Jetson Orin / Cortex-A78AE: ARMv8.2-A,
+  # no SVE). Builders on newer ARM cores otherwise emit SVE instructions here
+  # via -O3/-ffast-math autovectorization, which SIGILLs on the robots.
+  add_compile_options(-march=armv8.2-a)
+endif()
+
 add_library(mppi_controller SHARED
   src/controller.cpp
   src/optimizer.cpp
