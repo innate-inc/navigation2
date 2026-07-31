@@ -108,7 +108,12 @@ set(libraries mppi_controller mppi_critics)
 foreach(lib IN LISTS libraries)
   target_compile_options(${lib} PUBLIC -fconcepts)
   target_include_directories(${lib} PUBLIC ${xsimd_INCLUDE_DIRS})  #  ${OpenMP_INCLUDE_DIRS}
-  target_link_libraries(${lib} xtensor xtensor::optimize xtensor::use_xsimd)
+  # xtensor::optimize injects -march=native as an INTERFACE flag, which lands
+  # after (and overrides) this package's explicit -march pin on both compile
+  # and link lines — on SVE-capable builders that ships SVE code that SIGILLs
+  # on the fleet's Cortex-A78AE. Link xtensor without it; the armv8.2-a pin
+  # above governs optimization targeting.
+  target_link_libraries(${lib} xtensor xtensor::use_xsimd)
   ament_target_dependencies(${lib} ${dependencies_pkgs})
 endforeach()
 
